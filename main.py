@@ -30,7 +30,7 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def block_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_user_admin(update, update.effective_user.id):
-        await update.message.reply_text("⛔ فقط ادمین‌ها می‌تونن از این دستور استفاده کنن.")
+        await update.message.reply_text("⛔️ فقط ادمین‌ها می‌تونن از این دستور استفاده کنن.")
         return
 
     if not context.args:
@@ -48,7 +48,7 @@ async def block_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_blocked(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_user_admin(update, update.effective_user.id):
-        await update.message.reply_text("⛔ فقط ادمین‌ها می‌تونن این لیست رو ببینن.")
+        await update.message.reply_text("⛔️ فقط ادمین‌ها می‌تونن این لیست رو ببینن.")
         return
 
     blocked_packs = load_blocked()
@@ -59,7 +59,7 @@ async def list_blocked(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, parse_mode="Markdown")
 
 if __name__ == "__main__":
-    token = os.getenv("8381798336:AAFJzwST_zeCSEooXa2pL1YP8LF_MRZuGFg")
+    token = "8381798336:AAFJzwST_zeCSEooXa2pL1YP8LF_MRZuGFg"
     app = ApplicationBuilder().token(token).build()
 
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
