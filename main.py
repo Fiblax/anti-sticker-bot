@@ -59,7 +59,7 @@ async def list_blocked(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, parse_mode="Markdown")
 
 if name == "main":
-    token = os.getenv("BOT_TOKEN")
+    token = os.getenv("8381798336:AAFJzwST_zeCSEooXa2pL1YP8LF_MRZuGFg")
     app = ApplicationBuilder().token(token).build()
 
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
