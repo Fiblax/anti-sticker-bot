@@ -58,7 +58,7 @@ async def list_blocked(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "📛 پک‌های بلاک‌شده:\n" + "\n".join(f"• {p}" for p in blocked_packs)
         await update.message.reply_text(text, parse_mode="Markdown")
 
-if name == "main":
+if __name__ == "__main__":
     token = os.getenv("8381798336:AAFJzwST_zeCSEooXa2pL1YP8LF_MRZuGFg")
     app = ApplicationBuilder().token(token).build()
 
