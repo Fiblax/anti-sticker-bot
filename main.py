@@ -11,8 +11,8 @@ from telegram.ext import (
 # ===== تنظیمات =====
 BLOCKED_FILE = "blocked.json"
 MEMORY_FILE = "memory.json"
-OWNER_ID = 1841766279  # آیدی عددی شما
-ALLOWED_GROUP_ID = -1001222208308  # آیدی گروه
+OWNER_ID = 1841766279
+ALLOWED_GROUP_ID = -1001222208308
 BOT_TOKEN = "8381798336:AAFJzwST_zeCSEooXa2pL1YP8LF_MRZuGFg"
 
 # ===== لیست فحش‌ها =====
@@ -24,7 +24,7 @@ INSULTS = [
     "احمق‌ترین موجود.", "لاشه متحرک.", "مغزت کجاست؟"
 ]
 
-# ===== مارکوف =====
+# ===== مارکوف تریگرام =====
 class MarkovChat:
     def __init__(self, file_path=MEMORY_FILE, max_messages=5000):
         self.file_path = file_path
@@ -47,31 +47,42 @@ class MarkovChat:
         self.model.clear()
         for msg in self.memory:
             words = msg.split()
-            for i in range(len(words) - 1):
-                self.model[words[i]].append(words[i + 1])
+            if len(words) < 3:
+                continue
+            for i in range(len(words) - 2):
+                key = (words[i], words[i+1])
+                self.model[key].append(words[i+2])
 
     def learn(self, message):
         self.memory.append(message)
         words = message.split()
-        for i in range(len(words) - 1):
-            self.model[words[i]].append(words[i + 1])
+        if len(words) < 3:
+            return
+        for i in range(len(words) - 2):
+            key = (words[i], words[i+1])
+            self.model[key].append(words[i+2])
         self.save()
 
-    def generate(self, length=15):
+    def generate(self):
         if not self.model:
             return None
-        word = random.choice(list(self.model.keys()))
-        result = [word]
-        for _ in range(length - 1):
-            next_words = self.model.get(word)
+        start = random.choice(list(self.model.keys()))
+        result = [start[0], start[1]]
+
+        # 70٪ بلند، 30٪ کوتاه
+        length = random.randint(5, 10) if random.random() < 0.3 else random.randint(15, 25)
+
+        for _ in range(length - 2):
+            key = (result[-2], result[-1])
+            next_words = self.model.get(key)
             if not next_words:
                 break
-            word = random.choice(next_words)
-            result.append(word)
+            result.append(random.choice(next_words))
+
         return " ".join(result)
 
 markov = MarkovChat()
-AUTO_CHAT = True  # حالت چت خودکار
+AUTO_CHAT = True
 
 # ===== مدیریت بلاک =====
 def load_blocked():
@@ -152,17 +163,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text
     user = update.effective_user
 
-    # یادگیری (پیام‌های خود ربات ذخیره نمی‌شوند)
     if not user.is_bot:
         markov.learn(text)
 
-    # شرایط جواب دادن
     must_reply = (
         message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id
     ) or (
         f"@{context.bot.username}" in text
     )
-    random_reply = AUTO_CHAT and random.random() < 0.1  # 10٪ جواب خودکار
+    random_reply = AUTO_CHAT and random.random() < 0.1
 
     if must_reply or random_reply:
         response = markov.generate()
