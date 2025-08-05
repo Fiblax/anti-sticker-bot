@@ -48,16 +48,34 @@ class MarkovChat:
     def _rebuild_model(self):
         self.model.clear()
         for msg in self.memory:
-            words = msg.split()
+            # پیام‌ها فرمتش "<user_id> متن پیام" هست، پس باید پیام رو جدا کنیم
+            # ولی برای ساخت مدل، متن پیام رو استفاده می‌کنیم
+            if msg.startswith("<") and "> " in msg:
+                # جدا کردن آیدی و متن
+                split_index = msg.find("> ")
+                content = msg[split_index+2:]
+            else:
+                content = msg  # برای سازگاری با پیام‌های قدیمی
+
+            words = content.split()
             if len(words) < 3:
                 continue
             for i in range(len(words) - 2):
                 key = (words[i], words[i+1])
                 self.model[key].append(words[i+2])
 
-    def learn(self, message):
+    def learn(self, message, user_id=None):
+        if user_id is not None:
+            message = f"<{user_id}> {message}"
         self.memory.append(message)
-        words = message.split()
+        # برای ساخت مدل فقط متن پیام بدون آیدی رو استفاده می‌کنیم
+        if message.startswith("<") and "> " in message:
+            split_index = message.find("> ")
+            content = message[split_index+2:]
+        else:
+            content = message
+
+        words = content.split()
         if len(words) < 3:
             return
         for i in range(len(words) - 2):
@@ -123,7 +141,7 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=ALLOWED_GROUP_ID, text=text, parse_mode="Markdown")
     else:
         await update.message.delete()
-        keyboard = InlineKeyboardMarkup([[
+        keyboard = InlineKeyboardMarkup([[ 
             InlineKeyboardButton("بیخیال", callback_data=f"ignore:{user.id}"),
             InlineKeyboardButton("فحش بده", callback_data=f"insult:{user.id}:{user.username or user.full_name}")
         ]])
@@ -171,7 +189,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.is_bot:
         return
 
-    markov.learn(text)
+    markov.learn(text, user.id)  # اضافه شد user.id
 
     must_reply = (
         message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id
@@ -216,6 +234,25 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ فقط ادمین‌ها می‌تونن این کارو انجام بدن.")
     await update.message.reply_text(f"تعداد پیام‌های ذخیره‌شده: {len(markov.memory)}")
 
+# ===== دستور جدید پاک کردن پیام‌های کاربر خاص =====
+async def clear_user_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_user_admin(update, update.effective_user.id):
+        return await update.message.reply_text("⛔ فقط ادمین‌ها می‌تونن این کارو انجام بدن.")
+    if not context.args:
+        return await update.message.reply_text("لطفا آیدی کاربر را بعد از دستور وارد کنید:\nمثال: /clearuser 123456789")
+    try:
+        user_id = int(context.args[0])
+    except:
+        return await update.message.reply_text("آیدی کاربر باید عدد باشه.")
+
+    new_memory = [msg for msg in markov.memory if not msg.startswith(f"<{user_id}> ")]
+    removed_count = len(markov.memory) - len(new_memory)
+    markov.memory = deque(new_memory, maxlen=markov.max_messages)
+    markov._rebuild_model()
+    markov.save()
+
+    await update.message.reply_text(f"حافظه {removed_count} پیام مربوط به کاربر {user_id} پاک شد.")
+
 # ===== دستورات استیکر (فقط ادمین‌ها) =====
 async def block_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_user_admin(update, update.effective_user.id):
@@ -243,14 +280,7 @@ async def unblock_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_blocked(blocked_packs)
     await update.message.reply_text(f"پک `{pack_name}` آنبلاک شد.", parse_mode="Markdown")
 
-# ===== ثبت دستورات در بات‌فادر =====
-# دستورها:
-# togglechatter - روشن/خاموش کردن چت خودکار
-# clearmemory - پاک کردن حافظه مارکوف
-# generate - تولید جمله جدید
-# stats - آمار حافظه
-# blocksticker - بلاک کردن پک استیکر
-# unblocksticker - آنبلاک کردن پک استیکر
+# ===== ثبت دستورات در بات‌فادر و گروه =====
 
 # ===== اجرای بات =====
 async def main():
@@ -265,15 +295,20 @@ async def main():
     # هندل دکمه‌های اینلاین
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # دستورات
+    # دستورات مارکوف
     app.add_handler(CommandHandler("togglechatter", toggle_chatter))
     app.add_handler(CommandHandler("clearmemory", clear_memory))
     app.add_handler(CommandHandler("generate", generate_text))
     app.add_handler(CommandHandler("stats", stats))
+
+    # دستور پاک کردن پیام‌های یک کاربر
+    app.add_handler(CommandHandler("clearuser", clear_user_memory))
+
+    # دستورات بلاک/آنبلاک استیکر
     app.add_handler(CommandHandler("blocksticker", block_sticker))
     app.add_handler(CommandHandler("unblocksticker", unblock_sticker))
 
-    print("بات شروع به کار کرد ...")
+    print("Bot started...")
     await app.run_polling()
 
 if __name__ == "__main__":
