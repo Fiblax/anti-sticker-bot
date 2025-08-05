@@ -68,17 +68,13 @@ class MarkovChat:
             return None
         start = random.choice(list(self.model.keys()))
         result = [start[0], start[1]]
-
-        # 70٪ بلند، 30٪ کوتاه
-        length = random.randint(5, 10) if random.random() < 0.3 else random.randint(15, 50)
-
+        length = random.randint(5, 10) if random.random() < 0.3 else random.randint(15, 25)
         for _ in range(length - 2):
             key = (result[-2], result[-1])
             next_words = self.model.get(key)
             if not next_words:
                 break
             result.append(random.choice(next_words))
-
         return " ".join(result)
 
 markov = MarkovChat()
@@ -103,21 +99,16 @@ async def is_user_admin(update: Update, user_id: int):
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ALLOWED_GROUP_ID:
         return
-
     sticker = update.message.sticker
     blocked_packs = load_blocked()
-
     if not sticker.set_name or sticker.set_name not in blocked_packs:
         return
-
     user = update.effective_user
     is_admin = await is_user_admin(update, user.id)
-
     admin_link = f"[ادمین](tg://user?id={OWNER_ID})"
     user_link = f"[{user.full_name}](tg://user?id={user.id})"
-
     if is_admin:
-        text = f"{admin_link} کاربر {user_link} (آیدی: {user.id}) یک استیکر بلاک‌شده فرستاد، ولی چون ادمینه حذف نشد."
+        text = f"{admin_link} کاربر {user_link} یک استیکر بلاک‌شده فرستاد، ولی چون ادمینه حذف نشد."
         await context.bot.send_message(chat_id=ALLOWED_GROUP_ID, text=text, parse_mode="Markdown")
     else:
         await update.message.delete()
@@ -125,25 +116,20 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("بیخیال", callback_data=f"ignore:{user.id}"),
             InlineKeyboardButton("فحش بده", callback_data=f"insult:{user.id}:{user.username or user.full_name}")
         ]])
-        text = f"{admin_link} کاربر {user_link} (آیدی: {user.id}) یک استیکر بلاک‌شده فرستاد و حذف شد."
+        text = f"{admin_link} کاربر {user_link} یک استیکر بلاک‌شده فرستاد و حذف شد."
         await context.bot.send_message(chat_id=ALLOWED_GROUP_ID, text=text, reply_markup=keyboard, parse_mode="Markdown")
 
 # ===== دکمه‌های شیشه‌ای =====
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     if update.effective_chat.id != ALLOWED_GROUP_ID:
         return
-
     is_admin = await is_user_admin(update, query.from_user.id)
     data = query.data.split(":")
     action = data[0]
-
     if not is_admin:
-        await query.answer("⛔ فقط ادمین‌ها می‌تونن از این دکمه استفاده کنن.", show_alert=True)
-        return
-
+        return await query.answer("⛔ فقط ادمین‌ها می‌تونن از این دکمه استفاده کنن.", show_alert=True)
     if action == "ignore":
         await query.edit_message_text("اوکی، بیخیالش.")
     elif action == "insult":
@@ -156,23 +142,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global AUTO_CHAT
     message = update.message
     chat_id = message.chat.id
-
     if chat_id != ALLOWED_GROUP_ID:
         return
-
     text = message.text
     user = update.effective_user
-
     if not user.is_bot:
         markov.learn(text)
-
     must_reply = (
         message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id
     ) or (
         f"@{context.bot.username}" in text
     )
     random_reply = AUTO_CHAT and random.random() < 0.1
-
     if must_reply or random_reply:
         response = markov.generate()
         if response:
@@ -197,6 +178,24 @@ async def clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     markov.model.clear()
     markov.save()
     await update.message.reply_text("🧹 حافظه مارکوف پاک شد.")
+
+# دستور جدید: نمایش آمار مارکوف
+async def markov_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_user_admin(update, update.effective_user.id):
+        return await update.message.reply_text("⛔ فقط ادمین‌ها می‌تونن این دستور رو بزنن.")
+    memory_count = len(markov.memory)
+    model_count = len(markov.model)
+    await update.message.reply_text(f"📊 آمار مارکوف:\n- تعداد پیام‌های ذخیره‌شده: {memory_count}\n- تعداد کل ترکیب‌ها: {model_count}")
+
+# دستور جدید: تولید متن دستی
+async def generate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_user_admin(update, update.effective_user.id):
+        return await update.message.reply_text("⛔ فقط ادمین‌ها می‌تونن این دستور رو بزنن.")
+    response = markov.generate()
+    if response:
+        await update.message.reply_text(response)
+    else:
+        await update.message.reply_text("❌ هنوز چیزی برای یاد گرفتن وجود نداره.")
 
 # ===== دستورات استیکر =====
 async def block_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -246,7 +245,6 @@ async def list_blocked(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== شروع ربات =====
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(button_handler))
@@ -256,5 +254,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("listblocked", list_blocked))
     app.add_handler(CommandHandler("togglechatter", toggle_chatter))
     app.add_handler(CommandHandler("clearmemory", clear_memory))
-
+    app.add_handler(CommandHandler("markovstats", markov_stats))
+    app.add_handler(CommandHandler("generatetext", generate_text))
     app.run_polling()
