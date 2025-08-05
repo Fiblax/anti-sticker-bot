@@ -48,34 +48,16 @@ class MarkovChat:
     def _rebuild_model(self):
         self.model.clear()
         for msg in self.memory:
-            # پیام‌ها فرمتش "<user_id> متن پیام" هست، پس باید پیام رو جدا کنیم
-            # ولی برای ساخت مدل، متن پیام رو استفاده می‌کنیم
-            if msg.startswith("<") and "> " in msg:
-                # جدا کردن آیدی و متن
-                split_index = msg.find("> ")
-                content = msg[split_index+2:]
-            else:
-                content = msg  # برای سازگاری با پیام‌های قدیمی
-
-            words = content.split()
+            words = msg.split()
             if len(words) < 3:
                 continue
             for i in range(len(words) - 2):
                 key = (words[i], words[i+1])
                 self.model[key].append(words[i+2])
 
-    def learn(self, message, user_id=None):
-        if user_id is not None:
-            message = f"<{user_id}> {message}"
+    def learn(self, message):
         self.memory.append(message)
-        # برای ساخت مدل فقط متن پیام بدون آیدی رو استفاده می‌کنیم
-        if message.startswith("<") and "> " in message:
-            split_index = message.find("> ")
-            content = message[split_index+2:]
-        else:
-            content = message
-
-        words = content.split()
+        words = message.split()
         if len(words) < 3:
             return
         for i in range(len(words) - 2):
@@ -99,6 +81,21 @@ class MarkovChat:
             result.append(random.choice(next_words))
 
         return " ".join(result)
+
+    def remove_user_messages(self, user_id: int, user_messages_map):
+        # user_messages_map: dict[user_id] = list of messages
+        # حذف پیام‌هایی که از یک user_id هست
+        removed_count = 0
+        new_memory = deque(maxlen=self.max_messages)
+        for msg_user_id, msg_text in user_messages_map:
+            if msg_user_id != user_id:
+                new_memory.append(msg_text)
+            else:
+                removed_count += 1
+        self.memory = new_memory
+        self._rebuild_model()
+        self.save()
+        return removed_count
 
 # ===== مدیریت بلاک استیکر =====
 def load_blocked():
@@ -141,10 +138,8 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=ALLOWED_GROUP_ID, text=text, parse_mode="Markdown")
     else:
         await update.message.delete()
-        keyboard = InlineKeyboardMarkup([[ 
-            InlineKeyboardButton("بیخیال", callback_data=f"ignore:{user.id}"),
-            InlineKeyboardButton("فحش بده", callback_data=f"insult:{user.id}:{user.username or user.full_name}")
-        ]])
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("بیخیال", callback_data=f"ignore:{user.id}"),
+                                         InlineKeyboardButton("فحش بده", callback_data=f"insult:{user.id}:{user.username or user.full_name}")]])
         text = f"{admin_link} کاربر {user_link} (آیدی: {user.id}) یک استیکر بلاک‌شده فرستاد و حذف شد."
         await context.bot.send_message(chat_id=ALLOWED_GROUP_ID, text=text, reply_markup=keyboard, parse_mode="Markdown")
 
@@ -175,6 +170,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 markov = MarkovChat()
 AUTO_CHAT = True  # حالت چت خودکار روشن
 
+# برای ذخیره پیام‌ها همراه آیدی کاربر
+user_messages_map = deque(maxlen=5000)  # هر عضو: (user_id, text)
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global AUTO_CHAT
     message = update.message
@@ -186,10 +184,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text
     user = update.effective_user
 
-    if user.is_bot:
+    if user.is_bot or not text:
         return
 
-    markov.learn(text, user.id)  # اضافه شد user.id
+    # ذخیره پیام برای مارکوف به همراه آیدی کاربر
+    user_messages_map.append((user.id, text))
+
+    markov.learn(text)
 
     must_reply = (
         message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id
@@ -220,6 +221,7 @@ async def clear_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ فقط ادمین‌ها می‌تونن این کارو انجام بدن.")
     markov.memory.clear()
     markov.model.clear()
+    user_messages_map.clear()
     markov.save()
     await update.message.reply_text("🧹 حافظه مارکوف پاک شد.")
 
@@ -234,24 +236,29 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ فقط ادمین‌ها می‌تونن این کارو انجام بدن.")
     await update.message.reply_text(f"تعداد پیام‌های ذخیره‌شده: {len(markov.memory)}")
 
-# ===== دستور جدید پاک کردن پیام‌های کاربر خاص =====
-async def clear_user_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def remove_memory_from(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_user_admin(update, update.effective_user.id):
         return await update.message.reply_text("⛔ فقط ادمین‌ها می‌تونن این کارو انجام بدن.")
     if not context.args:
-        return await update.message.reply_text("لطفا آیدی کاربر را بعد از دستور وارد کنید:\nمثال: /clearuser 123456789")
+        return await update.message.reply_text("لطفاً آیدی عددی کاربر مورد نظر را بعد از دستور وارد کنید.\nمثال: /removememoryfrom 123456789")
     try:
-        user_id = int(context.args[0])
+        user_id_to_remove = int(context.args[0])
     except:
-        return await update.message.reply_text("آیدی کاربر باید عدد باشه.")
-
-    new_memory = [msg for msg in markov.memory if not msg.startswith(f"<{user_id}> ")]
-    removed_count = len(markov.memory) - len(new_memory)
-    markov.memory = deque(new_memory, maxlen=markov.max_messages)
+        return await update.message.reply_text("آیدی وارد شده معتبر نیست.")
+    removed_count = 0
+    global user_messages_map
+    # حذف پیام‌های اون کاربر از لیست پیام‌ها و مدل مارکوف
+    new_map = deque()
+    for uid, msg_text in user_messages_map:
+        if uid != user_id_to_remove:
+            new_map.append((uid, msg_text))
+        else:
+            removed_count += 1
+    user_messages_map = new_map
+    markov.memory = deque([msg for uid, msg in user_messages_map], maxlen=markov.max_messages)
     markov._rebuild_model()
     markov.save()
-
-    await update.message.reply_text(f"حافظه {removed_count} پیام مربوط به کاربر {user_id} پاک شد.")
+    await update.message.reply_text(f"پیام‌های یادگرفته شده از کاربر با آیدی {user_id_to_remove} پاک شد.\nتعداد پیام‌های حذف شده: {removed_count}")
 
 # ===== دستورات استیکر (فقط ادمین‌ها) =====
 async def block_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -280,7 +287,14 @@ async def unblock_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_blocked(blocked_packs)
     await update.message.reply_text(f"پک `{pack_name}` آنبلاک شد.", parse_mode="Markdown")
 
-# ===== ثبت دستورات در بات‌فادر و گروه =====
+# ===== ثبت دستورات در بات‌فادر =====
+# togglechatter - روشن یا خاموش کردن حالت چت خودکار (پاسخ تصادفی)
+# clearmemory - پاک کردن کل حافظه یادگیری مارکوف
+# generate - تولید یک جمله جدید با مدل مارکوف
+# stats - نمایش آمار حافظه
+# blocksticker - بلاک کردن پک استیکر خاص
+# unblocksticker - آنبلاک کردن پک استیکر خاص
+# removememoryfrom - حذف پیام‌های یادگرفته شده از یک کاربر خاص
 
 # ===== اجرای بات =====
 async def main():
@@ -295,20 +309,16 @@ async def main():
     # هندل دکمه‌های اینلاین
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # دستورات مارکوف
+    # کامندها
     app.add_handler(CommandHandler("togglechatter", toggle_chatter))
     app.add_handler(CommandHandler("clearmemory", clear_memory))
     app.add_handler(CommandHandler("generate", generate_text))
     app.add_handler(CommandHandler("stats", stats))
-
-    # دستور پاک کردن پیام‌های یک کاربر
-    app.add_handler(CommandHandler("clearuser", clear_user_memory))
-
-    # دستورات بلاک/آنبلاک استیکر
     app.add_handler(CommandHandler("blocksticker", block_sticker))
     app.add_handler(CommandHandler("unblocksticker", unblock_sticker))
+    app.add_handler(CommandHandler("removememoryfrom", remove_memory_from))
 
-    print("Bot started...")
+    print("Bot is running...")
     await app.run_polling()
 
 if __name__ == "__main__":
