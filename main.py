@@ -24,8 +24,8 @@ INSULTS = [
     "احمق‌ترین موجود.", "لاشه متحرک.", "مغزت کجاست؟"
 ]
 
-# ===== مارکوف تریگرام =====
-class MarkovChat:
+# ===== مدل تریگرام =====
+class TrigramChat:
     def __init__(self, file_path=MEMORY_FILE, max_messages=5000):
         self.file_path = file_path
         self.max_messages = max_messages
@@ -50,38 +50,38 @@ class MarkovChat:
             if len(words) < 3:
                 continue
             for i in range(len(words) - 2):
-                key = (words[i], words[i+1])
-                self.model[key].append(words[i+2])
+                self.model[(words[i], words[i+1])].append(words[i+2])
 
     def learn(self, message):
-        self.memory.append(message)
         words = message.split()
-        if len(words) < 3:
+        if len(words) < 2:
             return
-        for i in range(len(words) - 2):
-            key = (words[i], words[i+1])
-            self.model[key].append(words[i+2])
+        self.memory.append(message)
+        if len(words) >= 3:
+            for i in range(len(words) - 2):
+                self.model[(words[i], words[i+1])].append(words[i+2])
         self.save()
 
-    def generate(self):
+    def generate(self, length=None):
         if not self.model:
             return None
+        if length is None:
+            length = random.randint(1, 30)
         start = random.choice(list(self.model.keys()))
         result = [start[0], start[1]]
-
-        # 70٪ بلند، 30٪ کوتاه
-        length = random.randint(5, 10) if random.random() < 0.3 else random.randint(15, 25)
-
         for _ in range(length - 2):
-            key = (result[-2], result[-1])
-            next_words = self.model.get(key)
+            next_words = self.model.get((result[-2], result[-1]))
             if not next_words:
                 break
             result.append(random.choice(next_words))
+        return " ".join(result[:length])
 
-        return " ".join(result)
+    def random_message(self):
+        if not self.memory:
+            return None
+        return random.choice(self.memory)
 
-markov = MarkovChat()
+markov = TrigramChat()
 AUTO_CHAT = True
 
 # ===== مدیریت بلاک =====
@@ -103,19 +103,14 @@ async def is_user_admin(update: Update, user_id: int):
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ALLOWED_GROUP_ID:
         return
-
     sticker = update.message.sticker
     blocked_packs = load_blocked()
-
     if not sticker.set_name or sticker.set_name not in blocked_packs:
         return
-
     user = update.effective_user
     is_admin = await is_user_admin(update, user.id)
-
     admin_link = f"[ادمین](tg://user?id={OWNER_ID})"
     user_link = f"[{user.full_name}](tg://user?id={user.id})"
-
     if is_admin:
         text = f"{admin_link} کاربر {user_link} (آیدی: {user.id}) یک استیکر بلاک‌شده فرستاد، ولی چون ادمینه حذف نشد."
         await context.bot.send_message(chat_id=ALLOWED_GROUP_ID, text=text, parse_mode="Markdown")
@@ -132,18 +127,14 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     if update.effective_chat.id != ALLOWED_GROUP_ID:
         return
-
     is_admin = await is_user_admin(update, query.from_user.id)
     data = query.data.split(":")
     action = data[0]
-
     if not is_admin:
         await query.answer("⛔ فقط ادمین‌ها می‌تونن از این دکمه استفاده کنن.", show_alert=True)
         return
-
     if action == "ignore":
         await query.edit_message_text("اوکی، بیخیالش.")
     elif action == "insult":
@@ -156,25 +147,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global AUTO_CHAT
     message = update.message
     chat_id = message.chat.id
-
     if chat_id != ALLOWED_GROUP_ID:
         return
-
     text = message.text
     user = update.effective_user
-
     if not user.is_bot:
         markov.learn(text)
-
     must_reply = (
         message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id
     ) or (
         f"@{context.bot.username}" in text
     )
     random_reply = AUTO_CHAT and random.random() < 0.1
-
     if must_reply or random_reply:
-        response = markov.generate()
+        if random.random() < 0.8:
+            response = markov.generate()
+        else:
+            response = markov.random_message()
         if response:
             if must_reply:
                 await message.reply_text(response)
@@ -246,7 +235,6 @@ async def list_blocked(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== شروع ربات =====
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(button_handler))
@@ -256,5 +244,4 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("listblocked", list_blocked))
     app.add_handler(CommandHandler("togglechatter", toggle_chatter))
     app.add_handler(CommandHandler("clearmemory", clear_memory))
-
     app.run_polling()
