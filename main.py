@@ -1,31 +1,30 @@
 import os
 import json
 import random
-from datetime import datetime
 from telegram import (
-    Update, ChatMember,
-    InlineKeyboardButton, InlineKeyboardMarkup
+    Update, ChatMember, InlineKeyboardButton, InlineKeyboardMarkup
 )
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    CallbackQueryHandler, ContextTypes, filters
+    ApplicationBuilder, MessageHandler, CommandHandler,
+    CallbackQueryHandler, filters, ContextTypes
 )
 
-# تنظیمات
+# ===== تنظیمات =====
 BLOCKED_FILE = "blocked.json"
-OWNER_ID = 1841766279
-OWNER_USERNAME = "@thefiblax"
-GROUP_ID = -1001222208308
+OWNER_ID = 1841766279  # آیدی عددی شما
+OWNER_USERNAME = "@TheFiblax"  # یوزرنیم شما برای تگ
+ALLOWED_GROUP_ID = -1001222208308  # آیدی گروه «سَگِ مِشکی»
 
-# لیست فحش‌ها
+# ===== لیست فحش‌ها =====
 INSULTS = [
-    "احمق", "خر", "کندذهن", "چرت", "بیشعور",
-    "گاو", "شلخته", "مسخره", "مغز فندوقی", "پفیوز",
-    "ابله", "نخاله", "شاسگول", "کودن", "پرت",
-    "میکروب", "هویج", "بنگاه مشکل‌ساز", "مزخرف", "خرفت"
+    "خفه شو.", "گم شو.", "احمق بی‌مصرف.", "بی‌مغز پست.",
+    "کله‌پوچ.", "سگ ولگرد.", "عقب‌مونده ذهنی.", "برو خودتو جمع کن.",
+    "بی‌شرف.", "نابغه قرن.", "خر خودتی.", "کودن.", "چغاله.",
+    "شل مغز.", "لجن متحرک.", "برو یه فکری به حالت بکن.", "عنتر.",
+    "احمق‌ترین موجود.", "لاشه متحرک.", "مغزت کجاست؟"
 ]
 
-# --- ذخیره و لود پکیج‌های بلاک ---
+# ===== مدیریت بلاک =====
 def load_blocked():
     if not os.path.exists(BLOCKED_FILE):
         return []
@@ -36,64 +35,63 @@ def save_blocked(blocked_packs):
     with open(BLOCKED_FILE, "w") as f:
         json.dump(blocked_packs, f)
 
-# --- چک ادمین ---
 async def is_user_admin(update: Update, user_id: int):
     member = await update.effective_chat.get_member(user_id)
     return member.status in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]
 
-# --- هندلر استیکرها ---
+# ===== مدیریت استیکر =====
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != ALLOWED_GROUP_ID:
+        return
+
     sticker = update.message.sticker
     blocked_packs = load_blocked()
-    
+
     if sticker.set_name and sticker.set_name in blocked_packs:
         await update.message.delete()
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        report_text = (
-            f"📛 استیکر بلاک‌شده حذف شد!\n"
-            f"👤 ارسال‌کننده: {update.effective_user.mention_html()}\n"
-            f"🎨 پک: {sticker.set_name}\n"
-            f"⏰ زمان: {now}\n"
-            f"{OWNER_USERNAME}"
-        )
+        user = update.effective_user
+        username = f"@{user.username}" if user.username else user.first_name
 
-        keyboard = [
+        keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("بیخیال", callback_data="ignore"),
-                InlineKeyboardButton("فحش بده", callback_data="insult")
+                InlineKeyboardButton("بیخیال", callback_data=f"ignore:{user.id}"),
+                InlineKeyboardButton("فحش بده", callback_data=f"insult:{user.id}:{username}")
             ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        ])
 
         await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=report_text,
-            reply_markup=reply_markup,
-            parse_mode="HTML"
+            chat_id=ALLOWED_GROUP_ID,
+            text=f"{OWNER_USERNAME} استیکر بلاک‌شده از {username} حذف شد.",
+            reply_markup=keyboard
         )
 
-# --- هندلر دکمه‌ها ---
+# ===== دکمه‌های شیشه‌ای =====
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_id = query.from_user.id
-    chat = query.message.chat
-    is_admin = await chat.get_member(user_id)
-    is_admin = is_admin.status in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]
-
-    if not is_admin:
-        await query.edit_message_text("⛔️ فقط ادمین‌ها می‌تونن از این دکمه‌ها استفاده کنن.")
+    if update.effective_chat.id != ALLOWED_GROUP_ID:
         return
 
-    if query.data == "ignore":
-        await query.edit_message_text("اوکی بیخیالش")
-    elif query.data == "insult":
-        insult = random.choice(INSULTS)
-        await query.edit_message_text(f"{OWNER_USERNAME} گفت: {insult}")
+    is_admin = await is_user_admin(update, query.from_user.id)
 
-# --- دستورات ---
+    data = query.data.split(":")
+    action = data[0]
+
+    if not is_admin:
+        await query.answer("⛔ فقط ادمین‌ها می‌تونن از این دکمه استفاده کنن.", show_alert=True)
+        return
+
+    if action == "ignore":
+        await query.edit_message_text("اوکی، بیخیالش.")
+    elif action == "insult":
+        user_id = data[1]
+        username = data[2]
+        insult = random.choice(INSULTS)
+        await query.edit_message_text(f"کاربر {username} {insult}")
+
+# ===== دستورات =====
 async def block_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_user_admin(update, update.effective_user.id):
         await update.message.reply_text("⛔️ فقط ادمین‌ها می‌تونن از این دستور استفاده کنن.")
@@ -101,6 +99,7 @@ async def block_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("استفاده: /blocksticker نام_پک_استیکر")
         return
+
     pack_name = context.args[0]
     blocked_packs = load_blocked()
     if pack_name not in blocked_packs:
@@ -108,7 +107,7 @@ async def block_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_blocked(blocked_packs)
         await update.message.reply_text(f"✅ پک {pack_name} به لیست بلاک اضافه شد.")
     else:
-        await update.message.reply_text("این پک قبلاً توی لیست بلاک بوده.")
+        await update.message.reply_text("این پک قبلاً بلاک بوده.")
 
 async def unblock_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_user_admin(update, update.effective_user.id):
@@ -117,12 +116,13 @@ async def unblock_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("استفاده: /unblocksticker نام_پک_استیکر")
         return
+
     pack_name = context.args[0]
     blocked_packs = load_blocked()
     if pack_name in blocked_packs:
         blocked_packs.remove(pack_name)
         save_blocked(blocked_packs)
-        await update.message.reply_text(f"♻️ پک {pack_name} از لیست بلاک حذف شد.")
+        await update.message.reply_text(f"❎ پک {pack_name} از لیست بلاک حذف شد.")
     else:
         await update.message.reply_text("این پک توی لیست بلاک نبود.")
 
@@ -131,7 +131,7 @@ async def clear_blocked(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔️ فقط ادمین‌ها می‌تونن از این دستور استفاده کنن.")
         return
     save_blocked([])
-    await update.message.reply_text("🧹 لیست بلاک پاک شد.")
+    await update.message.reply_text("🧹 تمام پک‌های بلاک پاک شدند.")
 
 async def list_blocked(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_user_admin(update, update.effective_user.id):
@@ -144,7 +144,7 @@ async def list_blocked(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "📛 پک‌های بلاک‌شده:\n" + "\n".join(f"• {p}" for p in blocked_packs)
         await update.message.reply_text(text)
 
-# --- شروع بات ---
+# ===== شروع ربات =====
 if __name__ == "__main__":
     token = "8381798336:AAFJzwST_zeCSEooXa2pL1YP8LF_MRZuGFg"
     app = ApplicationBuilder().token(token).build()
