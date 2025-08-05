@@ -58,7 +58,7 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_admin:
         # ادمین → استیکر حذف نمی‌شود
-        text = f"{admin_link} کاربر {user_link} (آیدی: {user.id}) یک استیکر بلاک‌شده فرستاد، ولی چون ادمین است حذف نشد."
+        text = f"{admin_link} کاربر {user_link} (آیدی: {user.id}) :(یک استیکر بلاک‌شده فرستاد، ولی چون ادمینه حذف نشد."
         await context.bot.send_message(
             chat_id=ALLOWED_GROUP_ID,
             text=text,
